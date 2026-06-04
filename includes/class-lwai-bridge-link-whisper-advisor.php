@@ -139,6 +139,7 @@ class LWAI_Bridge_Link_Whisper_Advisor
         );
 
         if (!empty($facts['bridge_ready'])) {
+            $embedding_mode = isset($facts['embedding_mode']) ? $facts['embedding_mode'] : 'auto';
             self::add_recommendation(
                 $recommendations,
                 'enable-ai-suggestions',
@@ -152,32 +153,47 @@ class LWAI_Bridge_Link_Whisper_Advisor
                 false
             );
 
-            self::add_recommendation(
-                $recommendations,
-                'enable-ai-batches',
-                'wpil_enable_ai_batch_processing',
-                'تفعيل معالجة AI على دفعات',
-                'مزودك يدعم Files/Batches المتوافقة مع OpenAI، وهذا مناسب للمواقع الكبيرة لأنه يقلل الضغط أثناء تحليل المحتوى.',
-                self::option_int($current, 'wpil_enable_ai_batch_processing', 0),
-                1,
-                'safe',
-                true,
-                false
-            );
+            if ($embedding_mode === 'provider') {
+                self::add_recommendation(
+                    $recommendations,
+                    'enable-ai-batches',
+                    'wpil_enable_ai_batch_processing',
+                    'تفعيل معالجة AI على دفعات',
+                    'هذا مناسب فقط عندما يكون مزود embeddings الحقيقي يعمل على /v1/embeddings ويدعم Files/Batches.',
+                    self::option_int($current, 'wpil_enable_ai_batch_processing', 0),
+                    1,
+                    'safe',
+                    true,
+                    false
+                );
 
-            $batch_processes = !empty($facts['has_product_like_content']) ? array(3, 4, 5) : array(4, 5);
-            self::add_recommendation(
-                $recommendations,
-                'ai-batch-processes',
-                'wpil_selected_ai_batch_processes',
-                'اختيار عمليات AI المناسبة للموقع',
-                'التركيز على حساب العلاقات الدلالية واكتشاف الكلمات المفتاحية يناسب موقعًا معرفيًا ودينيًا أكثر من تفعيل تحليل المنتجات.',
-                self::option_array($current, 'wpil_selected_ai_batch_processes', array(4, 5)),
-                $batch_processes,
-                'safe',
-                true,
-                false
-            );
+                $batch_processes = !empty($facts['has_product_like_content']) ? array(3, 4, 5) : array(4, 5);
+                self::add_recommendation(
+                    $recommendations,
+                    'ai-batch-processes',
+                    'wpil_selected_ai_batch_processes',
+                    'اختيار عمليات AI المناسبة للموقع',
+                    'التركيز على حساب العلاقات الدلالية واكتشاف الكلمات المفتاحية يناسب موقعًا معرفيًا ودينيًا أكثر من تفعيل تحليل المنتجات.',
+                    self::option_array($current, 'wpil_selected_ai_batch_processes', array(4, 5)),
+                    $batch_processes,
+                    'safe',
+                    true,
+                    false
+                );
+            } else {
+                self::add_recommendation(
+                    $recommendations,
+                    'disable-ai-batches-for-fallback',
+                    'wpil_enable_ai_batch_processing',
+                    'إيقاف دفعات AI عند استخدام fallback للـ embeddings',
+                    'وضع auto/local يعالج embeddings مباشرة ولا يعمل من خلال Files/Batches، لذلك إيقاف الدفعات يمنع فشل /v1/embeddings أثناء المعالجة الخلفية.',
+                    self::option_int($current, 'wpil_enable_ai_batch_processing', 0),
+                    0,
+                    'safe',
+                    true,
+                    false
+                );
+            }
 
             self::add_recommendation(
                 $recommendations,
@@ -427,6 +443,7 @@ class LWAI_Bridge_Link_Whisper_Advisor
         return array(
             'link_whisper_active' => class_exists('Wpil_Settings') || defined('WP_INTERNAL_LINKING_PLUGIN_DIR'),
             'bridge_ready' => $bridge_ready,
+            'embedding_mode' => isset($settings['embedding_mode']) ? $settings['embedding_mode'] : 'auto',
             'site_locale' => function_exists('get_locale') ? get_locale() : '',
             'post_types' => $post_types,
             'taxonomies' => $taxonomies,
@@ -440,6 +457,7 @@ class LWAI_Bridge_Link_Whisper_Advisor
         return array(
             'link_whisper_active' => !empty($facts['link_whisper_active']),
             'bridge_ready' => !empty($facts['bridge_ready']),
+            'embedding_mode' => isset($facts['embedding_mode']) ? $facts['embedding_mode'] : 'auto',
             'site_locale' => isset($facts['site_locale']) ? $facts['site_locale'] : '',
             'post_types' => isset($facts['post_types']) ? $facts['post_types'] : array(),
             'taxonomies' => isset($facts['taxonomies']) ? $facts['taxonomies'] : array(),

@@ -13,7 +13,11 @@ class LWAI_Bridge_Settings
             'base_url' => '',
             'api_key' => '',
             'chat_model' => 'gpt-4o-mini',
+            'embedding_mode' => 'auto',
+            'embedding_base_url' => '',
+            'embedding_api_key' => '',
             'embedding_model' => 'text-embedding-3-large',
+            'concurrency' => 5,
         );
     }
 
@@ -32,7 +36,10 @@ class LWAI_Bridge_Settings
         $settings['enabled'] = empty($input['enabled']) ? 0 : 1;
         $settings['base_url'] = self::normalize_base_url(isset($input['base_url']) ? $input['base_url'] : '');
         $settings['chat_model'] = self::sanitize_model(isset($input['chat_model']) ? $input['chat_model'] : $old['chat_model'], 'gpt-4o-mini');
+        $settings['embedding_mode'] = self::sanitize_embedding_mode(isset($input['embedding_mode']) ? $input['embedding_mode'] : $old['embedding_mode']);
+        $settings['embedding_base_url'] = self::normalize_base_url(isset($input['embedding_base_url']) ? $input['embedding_base_url'] : $old['embedding_base_url']);
         $settings['embedding_model'] = self::sanitize_model(isset($input['embedding_model']) ? $input['embedding_model'] : $old['embedding_model'], 'text-embedding-3-large');
+        $settings['concurrency'] = self::sanitize_concurrency(isset($input['concurrency']) ? $input['concurrency'] : $old['concurrency']);
 
         $raw_key = isset($input['api_key']) ? trim((string) $input['api_key']) : '';
         if (!empty($input['clear_api_key'])) {
@@ -41,6 +48,15 @@ class LWAI_Bridge_Settings
             $settings['api_key'] = self::encrypt_secret($raw_key);
         } else {
             $settings['api_key'] = isset($old['api_key']) ? $old['api_key'] : '';
+        }
+
+        $raw_embedding_key = isset($input['embedding_api_key']) ? trim((string) $input['embedding_api_key']) : '';
+        if (!empty($input['clear_embedding_api_key'])) {
+            $settings['embedding_api_key'] = '';
+        } elseif ($raw_embedding_key !== '' && strpos($raw_embedding_key, '***') === false) {
+            $settings['embedding_api_key'] = self::encrypt_secret($raw_embedding_key);
+        } else {
+            $settings['embedding_api_key'] = isset($old['embedding_api_key']) ? $old['embedding_api_key'] : '';
         }
 
         if (empty($settings['enabled'])) {
@@ -75,6 +91,28 @@ class LWAI_Bridge_Settings
         }
 
         return self::decrypt_secret($settings['api_key']);
+    }
+
+    public static function get_embedding_api_key($settings = null)
+    {
+        if ($settings === null) {
+            $settings = self::get_all();
+        }
+
+        if (empty($settings['embedding_api_key'])) {
+            return self::get_api_key($settings);
+        }
+
+        return self::decrypt_secret($settings['embedding_api_key']);
+    }
+
+    public static function get_embedding_base_url($settings = null)
+    {
+        if ($settings === null) {
+            $settings = self::get_all();
+        }
+
+        return !empty($settings['embedding_base_url']) ? $settings['embedding_base_url'] : $settings['base_url'];
     }
 
     public static function obfuscate_secret($secret)
@@ -152,11 +190,18 @@ class LWAI_Bridge_Settings
         $settings = array_merge(self::defaults(), is_array($settings) ? $settings : array());
         $models = get_option('wpil_chat_gpt_api', array());
         $models = is_array($models) ? $models : array();
+        $placeholder_chat_model = self::link_whisper_placeholder_chat_model();
         foreach (array('suggestion-scoring', 'post-summarizing', 'product-detecting', 'keyword-detecting') as $process) {
-            $models[$process] = $settings['chat_model'];
+            $models[$process] = $placeholder_chat_model;
         }
+        $models['create-post-embeddings'] = $settings['embedding_model'];
 
         update_option('wpil_chat_gpt_api', $models, false);
+
+        if ($settings['embedding_mode'] !== 'provider') {
+            update_option('wpil_enable_ai_batch_processing', '0', false);
+        }
+
         return true;
     }
 
@@ -187,6 +232,38 @@ class LWAI_Bridge_Settings
     {
         $model = trim((string) $model);
         return $model === '' ? $fallback : preg_replace('/[^A-Za-z0-9._:\/-]/', '', $model);
+    }
+
+    private static function sanitize_embedding_mode($mode)
+    {
+        $mode = trim((string) $mode);
+        return in_array($mode, array('auto', 'provider', 'local'), true) ? $mode : 'auto';
+    }
+
+    private static function link_whisper_placeholder_chat_model()
+    {
+        if (class_exists('Wpil_AI') && method_exists('Wpil_AI', 'get_supported_chat_models')) {
+            $supported = Wpil_AI::get_supported_chat_models();
+            if (is_array($supported) && isset($supported['gpt-4.1'])) {
+                return 'gpt-4.1';
+            }
+        }
+
+        return 'gpt-4o-mini';
+    }
+
+    private static function sanitize_concurrency($value)
+    {
+        $value = (int) $value;
+        if ($value < 1) {
+            return 1;
+        }
+
+        if ($value > 20) {
+            return 20;
+        }
+
+        return $value;
     }
 
     private static function decrypt_link_whisper_secret($value)
