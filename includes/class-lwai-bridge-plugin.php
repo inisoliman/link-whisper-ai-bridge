@@ -474,6 +474,20 @@ class LWAI_Bridge_Plugin
             $embeddings = $client->embeddings($embedding_payload);
             $embeddings_info = $client->getCURLInfo();
 
+            $embeddings_summary = self::summarize_provider_response($embeddings, 'data', $embeddings_info);
+            $embeddings_summary['effective_source'] = self::detect_embedding_source($embeddings_info);
+
+            // In auto/local modes a real provider 404 is expected and handled by the local
+            // lexical fallback, so Link Whisper keeps working. Surface that clearly so a
+            // provider without /v1/embeddings does not look like a fatal failure.
+            $embeddings_summary['link_whisper_will_work'] =
+                ($embeddings_summary['effective_source'] === 'local-fallback') || !empty($embeddings_summary['ok']);
+
+            if ($embeddings_summary['effective_source'] === 'local-fallback') {
+                $embeddings_summary['ok'] = true;
+                $embeddings_summary['message'] = 'Provider has no /v1/embeddings endpoint, so the bridge used the built-in local lexical fallback. Link Whisper will keep running, but for true semantic relations point "Embedding Base URL" to a provider that supports /v1/embeddings.';
+            }
+
             wp_send_json_success(array(
                 'base_url_saved' => $settings['base_url'],
                 'client_base_url' => LWAI_Bridge_Client::base_url_for_openai_client($settings['base_url']),
@@ -482,8 +496,9 @@ class LWAI_Bridge_Plugin
                 'embedding_mode' => $settings['embedding_mode'],
                 'concurrency' => (int) $settings['concurrency'],
                 'chat' => self::summarize_provider_response($chat, 'choices', $chat_info),
-                'embeddings' => self::summarize_provider_response($embeddings, 'data', $embeddings_info),
+                'embeddings' => $embeddings_summary,
             ));
+
         } catch (Throwable $e) {
             wp_send_json_error(array(
                 'message' => 'The bridge hit a PHP error while testing the provider.',
@@ -659,8 +674,19 @@ class LWAI_Bridge_Plugin
         return $summary;
     }
 
+    private static function detect_embedding_source($curl_info)
+    {
+        $url = self::extract_curl_value($curl_info, 'url');
+        if (is_string($url) && strpos($url, 'local://') === 0) {
+            return 'local-fallback';
+        }
+
+        return 'provider';
+    }
+
     private static function extract_http_code($curl_info)
     {
+
         $code = self::extract_curl_value($curl_info, 'http_code');
         return $code === null ? null : (int) $code;
     }
